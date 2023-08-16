@@ -1,7 +1,7 @@
 # Introduction
 The source code and models for our paper **Combating Noisy Labels by Partial Label Learning**
 # Framework
-![https://github.com/LPL-LPL/LPL/blob/main/Framework.pdf]
+![Our Framework]https://github.com/LPL-LPL/LPL/blob/main/Framework.pdf
 # Installation
 After creating a virtual environment of python 3.7, run `pip install -r requirements.txt` to install all dependencies
 # How to use
