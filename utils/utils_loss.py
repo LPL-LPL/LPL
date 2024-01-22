@@ -32,13 +32,12 @@ class partial_loss(nn.Module):
             # # onehot
             # _, prot_pred = (temp_un_conf * batchY).max(dim=1)  
             # pseudo_label = F.one_hot(prot_pred, batchY.shape[1]).float().cuda().detach()  
-            # # print(prot_pred.size(),pseudo_label.size())  # torch.Size([128]) torch.Size([128, 100])
             
-            # # softmax
-            pseudo_label=torch.softmax(temp_un_conf* batchY/0.001 ,-1) # temperature==0.001    
+            # # # softmax
+            pseudo_label=torch.softmax(temp_un_conf* batchY/0.01 ,-1) # temperature==0.001    
 
-            self.confidence[batch_index, :] = self.conf_ema_m * self.confidence[batch_index, :]\
-                 + (1 - self.conf_ema_m) * pseudo_label   # torch.Size([128, 100]) 
+            # self.confidence[batch_index, :] = self.conf_ema_m * self.confidence[batch_index, :]\
+            #      + (1 - self.conf_ema_m) * pseudo_label   # torch.Size([128, 100]) 
 
         return None
 
