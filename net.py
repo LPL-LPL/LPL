@@ -72,10 +72,6 @@ def _vgg(arch: str, cfg: str, batch_norm: bool, pretrained: bool, progress: bool
     if pretrained:
         kwargs['init_weights'] = False
     model = VGG(make_layers(cfgs[cfg], batch_norm=batch_norm), **kwargs)
-    # if pretrained:
-    #     state_dict = load_state_dict_from_url(model_urls[arch],
-    #                                           progress=progress)
-    #     model.load_state_dict(state_dict)
     return model
 
 def vgg19_bn(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> VGG:
@@ -382,7 +378,6 @@ class InceptionResNetV2(nn.Module):
     def logits(self, features):
         x = self.avgpool_1a(features)
         x = x.view(x.size(0), -1)
-        # x = self.last_linear(x)
         return x
 
     def forward(self, input):
@@ -391,9 +386,9 @@ class InceptionResNetV2(nn.Module):
         return x
     
 def ResNetV2(**kwargs):
-    return InceptionResNetV2(num_classes=200) # 类别不影响
+    return InceptionResNetV2(num_classes=200) 
 
-# resnet50 自己写
+# resnet50 
 def init_weights(module, init_method='He'):
     for _, m in module.named_modules():
         if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
@@ -429,7 +424,6 @@ class MLPHead(nn.Module):
     def forward(self, x):
         return self.mlp_head(x)
 
-# 这里的num_class 不需要改 因为不会用到 只要确保是resnet50就可以
 class ResNet(nn.Module):
     def __init__(self, arch='resnet50', num_classes=200, pretrained=True, activation='tanh', classifier='linear'):
         super().__init__()
@@ -464,16 +458,11 @@ class ResNet(nn.Module):
         N = x.size(0)
         x = self.backbone(x)
         x = self.neck(x).view(N, -1)
-        # print(x.size())  # 128,512
-        # logits = self.classfier_head(x)
-        # prob = self.proba_head(x)
         return x
 
-# 修改 自己写
 def resnet50(**kwargs):
     return ResNet(arch="resnet50", num_classes=200, pretrained=True, activation='leaky relu' , classifier="linear")
 
-# 修改 自己写
 def resnet18(**kwargs):
     return ResNet(arch="resnet18", num_classes=200, pretrained=True, activation='leaky relu' , classifier="linear")
 
@@ -605,7 +594,7 @@ class  PreAct_ResNet(nn.Module):
         self.linear = nn.Linear(2048, num_classes)
         self.projection_head = nn.Linear(2048, 128)
         self.bnl = nn.BatchNorm1d(128)
-        self.neck = nn.AdaptiveAvgPool2d(output_size=(1, 1))  # 自己加
+        self.neck = nn.AdaptiveAvgPool2d(output_size=(1, 1))  
 
     def _make_layer(self, block, planes, num_blocks, stride):
         strides = [stride] + [1]*(num_blocks-1)
@@ -633,22 +622,15 @@ class  PreAct_ResNet(nn.Module):
             out = F.avg_pool2d(out, 4)
             out = self.neck(out)
             out = out.view(out.size(0), -1)
-            # print(out.size())  
-            # out1 = self.bnl(self.projection_head(out))
-            # out = self.linear(out)
 
         return out
 
 
 def PreAct_ResNet18(num_classes=10):
     return PreAct_ResNet(PreActBlock, [2,2,2,2], num_classes=num_classes)
-#----------------------------
 
 
 
-
-
-# 修改 直接加进来
 class CNN(nn.Module):
     def __init__(self, input_channel=3, dropout_rate=0.25, momentum=0.1, activation='tanh'):
         self.dropout_rate = dropout_rate
@@ -691,26 +673,17 @@ class CNN(nn.Module):
         x = self.block2(x)
         x = self.block3(x)
         x = x.view(x.size(0), -1)
-        # print('x.shape',x.shape)  # x.shape torch.Size([256, 256]) 
-        return x   # x.shape torch.Size([128, 256])
-        # logits = self.classfier_head(x)
-        # prob = self.proba_head(x)
-        # print('logits.shape', logits.shape, 'prob.shape', prob.shape)
-        # logits.shape torch.Size([128, 100]) prob.shape torch.Size([128, 3])
-        # return {'logits': logits, 'prob': prob}
+        return x   
 
-# 修改 自己写
+
 def sevenCNN(**kwargs):
     return CNN(input_channel=3)
 
 model_dict = {
-    'sevenCNN':[sevenCNN,256],  # 最后一个是输出
-    'preact_resnet18': [PreAct_ResNet18, 512],  # 加neck
-    # 'preact_resnet18': [PreAct_ResNet18, 2048],  # 不加neck
+    'sevenCNN':[sevenCNN,256],  
+    'preact_resnet18': [PreAct_ResNet18, 512], 
     'resnet18': [resnet18, 512],
-    # 'resnet34': [resnet34, 512],
     'resnet50': [resnet50, 2048],
-    # 'resnet101': [resnet101, 2048],
     'InceptionResNetV2':[ResNetV2,1536],
     'vgg19_bn':[vgg19_bn,512]
 }
@@ -742,22 +715,18 @@ class SupConResNet(nn.Module):
     """backbone + projection head"""
     def __init__(self, name='sevenCNN', head='mlp', feat_dim=128, num_class=0, closeset_ratio=0,pretrained=False):
         super(SupConResNet, self).__init__()
-        model_fun, dim_in = model_dict[name]  # dim_in 输入层个数
+        model_fun, dim_in = model_dict[name]  
         
-        # print(model_fun, dim_in) # 查看是否传入  # 对
-        # print(num_class)
 
         if pretrained:
             model = models.resnet18(pretrained=True)
             model.fc = Identity()
             self.encoder = model
-            # Note: torchvision pretrained model is slightly different from ours, 
-            # when training CUB, using torchvision model will be more memory efficient
-            # print('model_fun',model_fun, 'dim_in', dim_in)
 
-        else:  # 不使用预训练模型
+
+        else:  
             self.encoder = model_fun()
-            # print('dim_in', dim_in)  # dim_in 512 
+
         
         self.fc = nn.Linear(dim_in, num_class)
 
@@ -779,7 +748,6 @@ class SupConResNet(nn.Module):
         feat = self.encoder(x)        
         feat_c = self.head(feat)
         logits = self.fc(feat)
-        # print(feat.size(),feat_c.size(),logits.size(),F.normalize(feat_c, dim=1).size())
-        # torch.Size([128, 256]) torch.Size([128, 128]) torch.Size([128, 100]) torch.Size([128, 128])
+
         return logits, F.normalize(feat_c, dim=1)
 

@@ -29,19 +29,20 @@ from data.image_folder import IndexedImageFolder
 LOG_FREQ = 1
 from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-from torch.utils.data import Dataset, DataLoader
-import torchvision.transforms as transforms
-from PIL import Image
+from data.food101n import *
+from data.food101 import *
+
+
 
 torch.set_printoptions(precision=2, sci_mode=False)
 
 parser = argparse.ArgumentParser(description='PyTorch implementation of LPL')
 parser.add_argument('--dataset', default='cifar10', type=str, 
-                    choices=["Animal10N",'cifar10', 'cifar100',"web-aircraft","web-bird",'web-car',"Webvision"],
+                    choices=['cifar10', 'cifar100',"web-aircraft","web-bird",'web-car','food101n'],
                     help='dataset name (cifar10)')
 parser.add_argument('--exp-dir', default='experiment/LPL', type=str,
                     help='experiment directory for saving checkpoints and logs')
-parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet50', choices=["vgg19_bn",'InceptionResNetV2',"resnet18","resnet50",'sevenCNN'],  
+parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet50', choices=["resnet18","resnet50",'sevenCNN'], 
                     help='network architecture (only resnet18 used in LPL)')
 parser.add_argument('-j', '--workers', default=32, type=int,
                     help='number of data loading workers (default: 32)')
@@ -53,7 +54,9 @@ parser.add_argument('-b', '--batch-size', default=128, type=int,
                          'using Data Parallel or Distributed Data Parallel')
 parser.add_argument('--lr', '--learning-rate', default=0.02, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
-parser.add_argument('-lr_decay_epochs', type=str, default='100,150,180',  
+parser.add_argument('--warmuplr', '--warmup-learning-rate', default=0.01, type=float,
+                    metavar='LR', help='initial warmup learning rate', dest='warmuplr')
+parser.add_argument('-lr_decay_epochs', type=str, default='100,150,180', 
                     help='where to decay lr, can be a list')
 parser.add_argument('-lr_decay_rate', type=float, default=0.1,
                     help='decay rate for learning rate')
@@ -83,27 +86,27 @@ parser.add_argument('--proto_m', default=0.99, type=float,
 parser.add_argument('--loss_weight1', default=0.5, type=float,
                     help='contrastive loss weight')
 parser.add_argument('--loss_weight2', default=0.5, type=float,
-                    help='contrastive loss weight')
+                    help='jsd loss weight')
 parser.add_argument('--conf_ema_range', default='0.95,0.8', type=str,
                     help='pseudo target updating coefficient (phi)')  
 parser.add_argument('--prot_start', default=80, type=int, 
                     help = 'Start Prototype Updating')
 
-parser.add_argument('--noise-type', type=str, default='symmetric')  
-parser.add_argument('--closeset_ratio', type=float, default='0.2')  
+parser.add_argument('--noise-type', type=str, default='symmetric') 
+parser.add_argument('--closeset_ratio', type=float, default='0.2') 
 parser.add_argument('--synthetic_data', type=str) 
 parser.add_argument('--n_classes', type=int, default='100') 
 parser.add_argument('--warmupepochs', type=int, default=1)  
 parser.add_argument('--epsilon', type=float, default=0.5)  
 parser.add_argument('--topk', type=int, default=10)  
-parser.add_argument('--forget_rate', type=float, default=0.2)  
-parser.add_argument('--rechange_per_epoch', type=int, default=50)  
+parser.add_argument('--forget_rate', type=float, default=0.2) 
+parser.add_argument('--rechange_per_epoch', type=int, default=50) 
 
 
 
 def main():
-    args = parser.parse_args()  
-    args.conf_ema_range = [float(item) for item in args.conf_ema_range.split(',')]  
+    args = parser.parse_args() 
+    args.conf_ema_range = [float(item) for item in args.conf_ema_range.split(',')] 
 
     print(args)
 
@@ -119,7 +122,7 @@ def main():
                       'disable data parallelism.')
 
     
-    model_path = 'Animal10N_{time}ds_{ds}_lr_{lr}_ep_{ep}_ps_{ps}_lw_{lw}_warmupepochs_{warmupepochs}_rechange_per_epoch_{rechange_per_epoch}'.format(
+    model_path = 'Food101N{time}ds_{ds}_lr_{lr}_ep_{ep}_ps_{ps}_lw_{lw}_warmupepochs_{warmupepochs}_rechange_per_epoch_{rechange_per_epoch}'.format(
                                             time=datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S'), 
                                             ds=args.dataset,
                                             lr=args.lr,
@@ -127,7 +130,7 @@ def main():
                                             ps=args.prot_start,
                                             lw=args.loss_weight1,
                                             warmupepochs=args.warmupepochs,
-                                            rechange_per_epoch=args.rechange_per_epoch) 
+                                            rechange_per_epoch=args.rechange_per_epoch)  
     args.exp_dir = os.path.join(args.exp_dir, model_path)  
     if not os.path.exists(args.exp_dir):
         os.makedirs(args.exp_dir)
@@ -150,7 +153,7 @@ def main_worker(gpu, args):
     print("=> creating model '{}'".format(args.arch))
     
 
-    model = LPL(args, SupConResNet)  
+    model = LPL(args, SupConResNet) 
 
     
     torch.cuda.set_device(args.gpu)
@@ -163,28 +166,29 @@ def main_worker(gpu, args):
     
     
     if args.synthetic_data == 'cifar80no': 
-        num_classes = 80
+        num_classes = 80  
     elif args.synthetic_data == 'cifar100nc':
-        num_classes = 100  
+        num_classes = 100 
     else:
         num_classes = args.n_classes
 
 
     dataset, train_loader, test_loader = build_dataset_loader(args)
     topk_index=torch.zeros(dataset['n_train_samples'],args.topk).cuda()  
-    train_givenY=torch.zeros(dataset['n_train_samples'],num_classes).cuda() 
+    train_givenY=torch.zeros(dataset['n_train_samples'],num_classes).cuda()  
+
 
     print('Calculating uniform targets...')
     
 
     train_noisy_labels = dataset['train'].noisy_labels
     train_noisy_labels = torch.tensor(train_noisy_labels) 
-    train_givenY=F.one_hot(train_noisy_labels.cuda(),num_classes=num_classes)  
+    train_givenY=F.one_hot(train_noisy_labels.cuda(),num_classes=num_classes) 
 
     
 
-    tempY = train_givenY.sum(dim=1).unsqueeze(1).repeat(1, train_givenY.shape[1])
-    confidence = train_givenY.float()/tempY  
+    tempY = train_givenY.sum(dim=1).unsqueeze(1).repeat(1, train_givenY.shape[1])  
+    confidence = train_givenY.float()/tempY 
     confidence = confidence.cuda()
 
 
@@ -211,12 +215,12 @@ def main_worker(gpu, args):
 
         adjust_learning_rate(args, optimizer, epoch)
 
-        train_acc=train(train_loader, model, loss_fn, loss_cont_fn, optimizer, epoch, args, logger, topk_index,train_givenY,start_upd_prot)  
+        train_acc=train(train_loader, model, loss_fn, loss_cont_fn, optimizer, epoch, args, logger, topk_index,train_givenY,start_upd_prot)
         
         
         if epoch==args.warmupepochs-1:
 
-            tempY = train_givenY.sum(dim=1).unsqueeze(1).repeat(1, train_givenY.shape[1]) 
+            tempY = train_givenY.sum(dim=1).unsqueeze(1).repeat(1, train_givenY.shape[1])  
             confidence = train_givenY.float()/tempY  
             loss_fn = partial_loss(confidence)
 
@@ -241,19 +245,19 @@ def main_worker(gpu, args):
             best_acc = acc_test
             is_best = True
 
-        # save checkpoint
-        save_checkpoint({
-                'epoch': epoch + 1,
-                'arch': args.arch,
-                'state_dict': model.state_dict(),
-                'optimizer' : optimizer.state_dict(),
-            }, is_best=is_best, filename='{}/checkpoint.pth.tar'.format(args.exp_dir),
-            best_file_name='{}/checkpoint_best.pth.tar'.format(args.exp_dir))
+        # save_checkpoint({
+        #         'epoch': epoch + 1,
+        #         'arch': args.arch,
+        #         'state_dict': model.state_dict(),
+        #         'optimizer' : optimizer.state_dict(),
+        #     }, is_best=is_best, filename='{}/checkpoint.pth.tar'.format(args.exp_dir),
+        #     best_file_name='{}/checkpoint_best.pth.tar'.format(args.exp_dir))
 
-def train(train_loader, model, loss_fn, loss_cont_fn, optimizer, epoch, args, tb_logger,topk_index,train_givenY,start_upd_prot=False): 
+def train(train_loader, model, loss_fn, loss_cont_fn, optimizer, epoch, args, tb_logger,topk_index,train_givenY,start_upd_prot=False):  
+    
 
     if args.synthetic_data == 'cifar80no': 
-        num_classes = 80  
+        num_classes = 80 
     elif args.synthetic_data == 'cifar100nc':
         num_classes = 100 
     else:
@@ -289,24 +293,29 @@ def train(train_loader, model, loss_fn, loss_cont_fn, optimizer, epoch, args, tb
             output = model(x,x_s,update=True)
             
             logits = output['logits']
+ 
             probs = logits.softmax(dim=1) 
-            index = torch.argmax(probs,dim=1) 
+            index = torch.argmax(probs,dim=1)  
 
             given_labels = get_smoothed_label_distribution(y, num_classes, epsilon=args.epsilon)
             pnp_loss = cross_entropy(logits, given_labels, reduction='mean')
- 
+
+            
             train_acc1, accK = accuracy(logits, y, topk=(1, args.topk))
             train_acc.update(train_acc1[0])
 
         
+
         if(epoch==args.warmupepochs-1): 
-            per_topk_prob, per_topk_index=torch.topk(probs,k=args.topk,dim=1,largest=True, sorted=True, out = None)   
+            per_topk_prob, per_topk_index=torch.topk(probs,k=args.topk,dim=1,largest=True, sorted=True, out = None) 
             topk_index[indices]=per_topk_index.float()
-            small_loss= F.cross_entropy(logits, y, reduce = False)  
+
+            small_loss= F.cross_entropy(logits.to(args.gpu), y, reduce = False)
+        
             ind_sorted = np.argsort(small_loss.data.cpu()).cuda()
             remember_rate = 1 - args.forget_rate
             num_remember = int(remember_rate * len(ind_sorted))
-            ind_update=ind_sorted[:num_remember].detach() 
+            ind_update=ind_sorted[:num_remember].detach()  
             for i in range(0,args.topk):
                 topk_index[indices.cuda(args.gpu)[ind_update],i]=sample['label'].cuda(args.gpu)[ind_update].float().detach()
           
@@ -316,9 +325,10 @@ def train(train_loader, model, loss_fn, loss_cont_fn, optimizer, epoch, args, tb
 
     
         end = time.time()
-        index = sample["index"] 
+        index = sample["index"]  
         Y= train_givenY[index]  
         Y_true = sample['label']  
+
 
         indices = sample['index']
         if ((epoch-args.warmupepochs+1)%args.rechange_per_epoch==0 and epoch-args.warmupepochs+1>0):
@@ -333,14 +343,20 @@ def train(train_loader, model, loss_fn, loss_cont_fn, optimizer, epoch, args, tb
                 output = model(x,x_s) 
 
             logits = output['logits']
+            logits2 = output['logits2']
+            
             probs = logits.softmax(dim=1)
             index = torch.argmax(probs,dim=1)  
-            per_topk_prob, per_topk_index=torch.topk(probs,k=args.topk,dim=1,largest=True, sorted=True, out = None)  
+            per_topk_prob, per_topk_index=torch.topk(probs,k=args.topk,dim=1,largest=True, sorted=True, out = None) 
             topk_index[indices]=per_topk_index.float()
-            small_loss= F.cross_entropy(logits, y, reduce = False) 
+           
+
+            small_loss=  F.cross_entropy(logits.to(args.gpu), y, reduce = False) 
+
+
             ind_sorted = np.argsort(small_loss.data.cpu()).cuda()
             remember_rate = 1 - args.forget_rate
-            num_remember = int(remember_rate * len(ind_sorted)*(1-0.001*decrease)) 
+            num_remember = int(remember_rate * len(ind_sorted)*(1-0.000*decrease)) 
 
             ind_update=ind_sorted[:num_remember]  
             for i in range(0,args.topk):
@@ -361,7 +377,6 @@ def train(train_loader, model, loss_fn, loss_cont_fn, optimizer, epoch, args, tb
 
             train_acc.update(train_acc1[0])
 
-
             lam=np.random.beta(25,10)
             new_index = torch.randperm(x.size(0)).cuda()
             mix_x = lam*x + (1-lam)*x[new_index,:]
@@ -377,51 +392,45 @@ def train(train_loader, model, loss_fn, loss_cont_fn, optimizer, epoch, args, tb
             if start_upd_prot:  
                 mix_pseudo_target_cont = mix_pseudo_target_cont.contiguous().view(-1, 1)
                 mask1 = torch.eq(mix_pseudo_target_cont[:batch_size], mix_pseudo_target_cont.T).float().cuda()  
-        
-                margin=0.95
-                mask2=torch.mm(mix_features_cont[:batch_size],mix_features_cont.T)  
+                margin=1
+                mask2=torch.mm(mix_features_cont[:batch_size],mix_features_cont.T) 
+
                 mask2=torch.where(mask2 > margin, 1, 0)
+
+
                 mask=mask2+mask1
                 mask=torch.where(mask >=1, 1, 0)
-                
+
             else:
                 mask = None
 
-
             loss_cont = loss_cont_fn(features=mix_features_cont, mask=mask, batch_size=batch_size)
-
-
-
+        
             loss_cls = loss_fn(cls_out, index.type(torch.long))
-            
 
-            given_labels = get_smoothed_label_distribution(Y_true.to(args.gpu), num_classes, epsilon=args.epsilon)
-            pnp_loss = cross_entropy(cls_out, given_labels, reduction='mean')
             
             jocor_loss = loss_jocor(cls_out.to(args.gpu), cls_out2.to(args.gpu), Y_true.to(args.gpu))
 
 
 
-
         if epoch<args.warmupepochs:
             loss = pnp_loss 
-
-            
-
         else:
-            loss =  loss_cls + args.loss_weight1 * loss_cont+ jocor_loss*args.loss_weight2 
-
-
+            loss = loss_cls + loss_cont*args.loss_weight1 + jocor_loss*args.loss_weight2
+        
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        
+
     if epoch==args.warmupepochs-1 :
-        train_givenY.scatter_(1,topk_index.long(),1)  
+        train_givenY.scatter_(1,topk_index.long(),1) 
+        
     elif ((epoch-args.warmupepochs+1)%args.rechange_per_epoch==0 and epoch-args.warmupepochs+1>0) :
-        train_givenY.scatter_(1,topk_index.long(),1)
+        train_givenY.scatter_(1,topk_index.long(),1) 
     
+
+
 
     return train_acc.avg
 
@@ -434,12 +443,11 @@ def test(model, test_loader, args, epoch, tb_logger):
         model.eval()    
         top1_acc = AverageMeter("Top1")
         topK_acc = AverageMeter("TopK")
+        
 
         for _, sample in enumerate(tqdm(test_loader, ncols=100, ascii=' >', leave=False, desc='evaluating')):
             images = sample['data'].cuda()
-
             labels = sample['label'].cuda()  
-
             outputs = model(images,images,eval_only=True)["logits"] 
 
   
@@ -447,7 +455,6 @@ def test(model, test_loader, args, epoch, tb_logger):
             top1_acc.update(acc1[0])
             topK_acc.update(accK[0])
         
-
         acc_tensors = torch.Tensor([top1_acc.avg,topK_acc.avg]).cuda(args.gpu)
         
         print('Accuracy is %.2f%% (%.2f%%)'%(acc_tensors[0],acc_tensors[1]))
@@ -471,154 +478,30 @@ class CLDataTransform(object):
         x_w1 = self.transform_weak(sample)
         x_w2 = self.transform_weak(sample)
         x_s = self.transform_strong(sample)
-        return x_w1, x_w2, x_s
-
-    def __getitem__(self, index):
-        if self.mode == 'train':
-            img_path = self.train_imgs[index]
-            target = self.train_labels[img_path]
-            image = Image.open(os.path.join(self.root, img_path)).convert('RGB')
-            img = self.transform(image)
-            return {'index': index, 'data': img, 'label': target}
-        elif self.mode == 'test':
-            img_path = self.val_imgs[index]
-            target = self.val_labels[img_path]
-            image = Image.open(os.path.join(self.root, 'val_images_256/', img_path)).convert('RGB')
-            img = self.transform(image)
-            return {'index': index, 'data': img, 'label': target}
-        else:
-            raise AssertionError("mode is incorrect.")
-
-    def __len__(self):
-        if self.mode != 'test':
-            return len(self.train_imgs)
-        else:
-            return len(self.val_imgs)
-
+        return x_w1, x_w2, x_s 
 
 def get_smoothed_label_distribution(labels, num_class, epsilon):
     smoothed_label = torch.full(size=(labels.size(0), num_class), fill_value=epsilon / (num_class - 1))  
-    smoothed_label.scatter_(dim=1, index=torch.unsqueeze(labels, dim=1).cpu(), value=1 - epsilon)  
+    smoothed_label.scatter_(dim=1, index=torch.unsqueeze(labels, dim=1).cpu(), value=1 - epsilon)
     return smoothed_label.to(labels.device)
 
-def build_webfg_dataset(root, train_transform, test_transform):
-    train_data = IndexedImageFolder(os.path.join(root, 'train'), transform=train_transform)  
-    test_data = IndexedImageFolder(os.path.join(root, 'val'), transform=test_transform)
+
+def build_food101n_dataset(root, train_transform, test_transform):
+    train_data = Food101N(root, transform=train_transform)
+    test_data = Food101(os.path.join(root, 'food-101'), split='test', transform=test_transform)
     return {'train': train_data, 'test': test_data, 'n_train_samples': len(train_data.samples), 'n_test_samples': len(test_data.samples)}
 
-def build_mini_webvision_dataset(root, train_transform, test_transform, num_class=50):
-    train_data = webvision_dataset(root, transform=train_transform, mode='train', num_class=num_class)
-    test_data = webvision_dataset(root, transform=test_transform, mode='test', num_class=num_class)
-    return {'train': train_data, 'test': test_data ,
-            'n_train_samples': len(train_data.samples), 'n_test_samples': len(test_data.samples)}
-
-
-class webvision_dataset(Dataset):
-    def __init__(self, root_dir, transform, mode, num_class):
-        self.root = root_dir
-        self.transform = transform
-        self.mode = mode
-
-        if self.mode == 'test':
-            with open(os.path.join(self.root, 'info/val_filelist.txt')) as f:
-                lines = f.readlines()
-            self.val_imgs = []
-            self.val_labels = {}
-            for line in lines:
-                img, target = line.split()
-
-                target = int(target)
-                if target < num_class:
-                    self.val_imgs.append(img)
-                    self.val_labels[img] = target
-            self.samples = self.val_imgs
-            self.noisy_labels = [self.val_labels[img] for img in self.samples]  
-        else:
-            with open(os.path.join(self.root, 'info/train_filelist_google.txt')) as f:
-                lines = f.readlines()
-            self.train_imgs = []
-            self.train_labels = {}
-            num_samples = 0
-            for line in lines:
-                img, target = line.split()
-                target = int(target)
-                if target < num_class:
-                    self.train_imgs.append(img)
-                    self.train_labels[img] = target
-                    num_samples += 1
-            self.samples = self.train_imgs
-
-            
-            self.noisy_labels = [self.train_labels[img] for img in self.samples] 
-
-
-
-
-
-
-    def __getitem__(self, index):
-        if self.mode == 'train':
-            img_path = self.train_imgs[index]
-            target = self.train_labels[img_path]
-            image = Image.open(os.path.join(self.root, img_path)).convert('RGB')
-            img = self.transform(image)
-            return {'index': index, 'data': img, 'label': target}
-        elif self.mode == 'test':
-            img_path = self.val_imgs[index]
-            target = self.val_labels[img_path]
-
-            image = Image.open(os.path.join(self.root,'val_images_256', img_path)).convert('RGB')
-            img = self.transform(image)
-            return {'index': index, 'data': img, 'label': target}
-        else:
-            raise AssertionError("mode is incorrect.")
-
-    def __len__(self):
-        if self.mode != 'test':
-            return len(self.train_imgs)
-        else:
-            return len(self.val_imgs)
-
-class Animal10N(Dataset):
-    def __init__(self, split='train', root_dir='animal10n', transform=None):
-        super().__init__()
-        self.root = os.path.join(root_dir, 'training' if split == 'train' else 'testing')
-        self.image_files = [f for f in os.listdir(self.root) if os.path.isfile(os.path.join(self.root, f))]
-        self.targets = [int(filename.split('_')[0]) for filename in self.image_files]
-        self.transform = transform
-        self.noisy_labels = self.targets
-
-    def __getitem__(self, index):
-        image_path = os.path.join(self.root, self.image_files[index])
-        image = Image.open(image_path)
-        if self.transform is not None:
-            image = self.transform(image)
-        target = self.targets[index]
-        return {'index': index, 'data': image, 'label': target}
-
-    def __len__(self):
-        return len(self.image_files)
-
-
-def build_animal10n_dataset(root, train_transform, test_transform):
-    train_data = Animal10N(split='train', root_dir=root, transform=train_transform)
-    test_data = Animal10N(split='test', root_dir=root, transform=test_transform)
-    return {'train': train_data, 'test': test_data, 'n_train_samples': len(train_data), 'n_test_samples': len(test_data)}
-
-
 def build_dataset_loader(params):
-    if params.dataset.startswith('Animal10N'):
-        transform = build_transform(rescale_size=64, crop_size=64)
- 
-
-    if params.dataset.startswith('Animal10N'):
-        dataset = build_animal10n_dataset(os.path.join("/home/jxr/proj/gaoyiyou/PICO/Animal-10N"), CLDataTransform(transform['train'], transform['train_strong_aug']), transform['test'])    
-
+    if params.dataset.startswith('food101n'):
+        transform = build_transform(rescale_size=256, crop_size=224)  
+    
+    if params.dataset == 'food101n':
+        dataset = build_food101n_dataset(os.path.join('/home/jxr/Dataset/Food-101N_release'), CLDataTransform(transform['train'], transform['train_strong_aug']), transform['test'])
+    
     train_loader = DataLoader(dataset['train'], batch_size=params.batch_size, shuffle=True, num_workers=8, pin_memory=True)
     test_loader = DataLoader(dataset['test'], batch_size=16, shuffle=False, num_workers=8, pin_memory=False)
 
     return dataset, train_loader, test_loader
-
 
 
 def loss_jocor(y_1, y_2, t):
@@ -626,7 +509,6 @@ def loss_jocor(y_1, y_2, t):
     loss_pick_1 = F.cross_entropy(y_1, t, reduce = False) * (1-co_lambda)
     loss_pick_2 = F.cross_entropy(y_2, t, reduce = False) * (1-co_lambda)
     loss_pick = (loss_pick_1 + loss_pick_2 + co_lambda * kl_loss_compute(y_1, y_2,reduce=False) + co_lambda * kl_loss_compute(y_2, y_1, reduce=False)).cpu()
-
 
     loss = torch.mean(loss_pick[:])
 

@@ -15,7 +15,7 @@ import torch.utils.data
 import torch.utils.data.distributed
 import tensorboard_logger as tb_logger
 import numpy as np
-from model import PiCO
+from model import LPL
 from net import *
 from utils.utils_algo import *
 from utils.utils_loss import partial_loss, SupConLoss
@@ -33,14 +33,14 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 torch.set_printoptions(precision=2, sci_mode=False)
 
-parser = argparse.ArgumentParser(description='PyTorch implementation of ICLR 2022 Oral paper PiCO')
+parser = argparse.ArgumentParser(description='PyTorch implementation of LPL')
 parser.add_argument('--dataset', default='cifar10', type=str, 
                     choices=['cifar10', 'cifar100',"web-aircraft","web-bird",'web-car'],
                     help='dataset name (cifar10)')
-parser.add_argument('--exp-dir', default='experiment/PiCO', type=str,
+parser.add_argument('--exp-dir', default='experiment/LPL', type=str,
                     help='experiment directory for saving checkpoints and logs')
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet50', choices=["resnet18","resnet50",'sevenCNN'], 
-                    help='network architecture (only resnet18 used in PiCO)')
+                    help='network architecture (only resnet18 used in LPL)')
 parser.add_argument('-j', '--workers', default=32, type=int,
                     help='number of data loading workers (default: 32)')
 parser.add_argument('--epochs', default=500, type=int, 
@@ -150,7 +150,7 @@ def main_worker(gpu, args):
     print("=> creating model '{}'".format(args.arch))
     
 
-    model = PiCO(args, SupConResNet) 
+    model = LPL(args, SupConResNet) 
 
     
     torch.cuda.set_device(args.gpu)
@@ -217,8 +217,8 @@ def main_worker(gpu, args):
         
         if epoch==args.warmupepochs-1:
 
-            tempY = train_givenY.sum(dim=1).unsqueeze(1).repeat(1, train_givenY.shape[1])  # torch.Size([50000, 100]) 0
-            confidence = train_givenY.float()/tempY  # torch.Size([50000, 100])
+            tempY = train_givenY.sum(dim=1).unsqueeze(1).repeat(1, train_givenY.shape[1])  
+            confidence = train_givenY.float()/tempY  
             loss_fn = partial_loss(confidence)
 
         
@@ -242,13 +242,13 @@ def main_worker(gpu, args):
             best_acc = acc_test
             is_best = True
 
-        save_checkpoint({
-                'epoch': epoch + 1,
-                'arch': args.arch,
-                'state_dict': model.state_dict(),
-                'optimizer' : optimizer.state_dict(),
-            }, is_best=is_best, filename='{}/checkpoint.pth.tar'.format(args.exp_dir),
-            best_file_name='{}/checkpoint_best.pth.tar'.format(args.exp_dir))
+        # save_checkpoint({
+        #         'epoch': epoch + 1,
+        #         'arch': args.arch,
+        #         'state_dict': model.state_dict(),
+        #         'optimizer' : optimizer.state_dict(),
+        #     }, is_best=is_best, filename='{}/checkpoint.pth.tar'.format(args.exp_dir),
+        #     best_file_name='{}/checkpoint_best.pth.tar'.format(args.exp_dir))
 
 def train(train_loader, model, loss_fn, loss_cont_fn, optimizer, epoch, args, tb_logger,topk_index,train_givenY,start_upd_prot=False):  
     
@@ -260,7 +260,7 @@ def train(train_loader, model, loss_fn, loss_cont_fn, optimizer, epoch, args, tb
     else:
         num_classes = args.n_classes
     
-    # warmup  + PICO ---------------------------------------------------------------------------------------------------------------------------------------   
+    # warmup  + LPL ---------------------------------------------------------------------------------------------------------------------------------------   
 
     train_loss = AverageMeter("train_loss")
     train_acc = AverageMeter("train_accuracy")
@@ -318,7 +318,7 @@ def train(train_loader, model, loss_fn, loss_cont_fn, optimizer, epoch, args, tb
           
 
     
-        # PICO training ---------------------------------------------------------------------------------------------------------------------------------------    
+        # LPL training ---------------------------------------------------------------------------------------------------------------------------------------    
 
     
         end = time.time()
@@ -380,7 +380,7 @@ def train(train_loader, model, loss_fn, loss_cont_fn, optimizer, epoch, args, tb
             mix_x_s = lam*x_s + (1-lam)*x_s[new_index,:]
             mix_Y = lam*Y + (1-lam)*Y[new_index]
 
-            mix_cls_out,mix_cls_out2, mix_features_cont, mix_pseudo_target_cont, mix_score_prot = model(mix_x, mix_x_s, mix_Y, args )#, update=True
+            mix_cls_out,mix_cls_out2, mix_features_cont, mix_pseudo_target_cont, mix_score_prot = model(mix_x, mix_x_s, mix_Y, args )
                 
         
             if start_upd_prot:  
@@ -491,23 +491,12 @@ def build_dataset_loader(params):
     if params.dataset.startswith('cifar'):
         transform = build_transform(rescale_size=32, crop_size=32)  
     
-    if params.dataset.startswith('web-'):
-        transform = build_transform(rescale_size=448, crop_size=448)
-
     if params.dataset == 'cifar100':
         if params.synthetic_data == 'cifar80no': 
-            dataset = build_cifar100n_dataset(os.path.join("cifar100", params.dataset), CLDataTransform(transform['cifar_train'], transform['cifar_train_strong_aug']), transform['cifar_test'], noise_type=params.noise_type, openset_ratio=0.2, closeset_ratio=params.closeset_ratio)  # 修改
+            dataset = build_cifar100n_dataset(os.path.join("cifar100", params.dataset), CLDataTransform(transform['cifar_train'], transform['cifar_train_strong_aug']), transform['cifar_test'], noise_type=params.noise_type, openset_ratio=0.2, closeset_ratio=params.closeset_ratio)  
         elif params.synthetic_data == 'cifar100nc':
             dataset = build_cifar100n_dataset(os.path.join("cifar100", params.dataset), CLDataTransform(transform['cifar_train'], transform['cifar_train_strong_aug']), transform['cifar_test'], noise_type=params.noise_type, openset_ratio=0, closeset_ratio=params.closeset_ratio)  
-    
-    if params.dataset.startswith('web-'): 
-        if params.dataset == 'web-bird':
-            dataset = build_webfg_dataset(os.path.join("/data/fgcv/web-data/", "web-bird"), CLDataTransform(transform['train'], transform['train_strong_aug']), transform['test']) 
-        elif params.dataset == 'web-car':
-            dataset = build_webfg_dataset(os.path.join("/data/fgcv/web-data/", "web-car"), CLDataTransform(transform['train'], transform['train_strong_aug']), transform['test']) 
-        elif params.dataset == 'web-aircraft':
-            dataset = build_webfg_dataset(os.path.join("/data/fgcv/web-data/", "web-aircraft"), CLDataTransform(transform['train'], transform['train_strong_aug']), transform['test'])
-        
+            
     train_loader = DataLoader(dataset['train'], batch_size=params.batch_size, shuffle=True, num_workers=8, pin_memory=True)
     test_loader = DataLoader(dataset['test'], batch_size=16, shuffle=False, num_workers=8, pin_memory=False)
 

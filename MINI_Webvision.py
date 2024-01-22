@@ -15,7 +15,7 @@ import torch.utils.data
 import torch.utils.data.distributed
 import tensorboard_logger as tb_logger
 import numpy as np
-from model import PiCO
+from model import LPL
 from net import *
 from utils.utils_algo import *
 from utils.utils_loss import partial_loss, SupConLoss
@@ -35,14 +35,14 @@ from PIL import Image
 
 torch.set_printoptions(precision=2, sci_mode=False)
 
-parser = argparse.ArgumentParser(description='PyTorch implementation of ICLR 2022 Oral paper PiCO')
+parser = argparse.ArgumentParser(description='PyTorch implementation of LPL')
 parser.add_argument('--dataset', default='cifar10', type=str, 
                     choices=['cifar10', 'cifar100',"web-aircraft","web-bird",'web-car',"Webvision"],
                     help='dataset name (cifar10)')
-parser.add_argument('--exp-dir', default='experiment/PiCO', type=str,
+parser.add_argument('--exp-dir', default='experiment/LPL', type=str,
                     help='experiment directory for saving checkpoints and logs')
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet50', choices=['InceptionResNetV2',"resnet18","resnet50",'sevenCNN'],  
-                    help='network architecture (only resnet18 used in PiCO)')
+                    help='network architecture (only resnet18 used in LPL)')
 parser.add_argument('-j', '--workers', default=32, type=int,
                     help='number of data loading workers (default: 32)')
 parser.add_argument('--epochs', default=500, type=int, 
@@ -148,7 +148,7 @@ def main_worker(gpu, args):
     # create model
     print("=> creating model '{}'".format(args.arch))  
 
-    model = PiCO(args, SupConResNet)
+    model = LPL(args, SupConResNet)
 
    
     torch.cuda.set_device(args.gpu)
@@ -257,7 +257,7 @@ def train(train_loader, model, loss_fn, loss_cont_fn, optimizer, epoch, args, tb
     else:
         num_classes = args.n_classes
     
-    # warmup  + PICO 同时训练---------------------------------------------------------------------------------------------------------------------------------------   
+    # warmup  + LPL ---------------------------------------------------------------------------------------------------------------------------------------   
 
     train_loss = AverageMeter("train_loss")
     train_acc = AverageMeter("train_accuracy")
@@ -311,7 +311,7 @@ def train(train_loader, model, loss_fn, loss_cont_fn, optimizer, epoch, args, tb
           
 
     
-        # PICO training ---------------------------------------------------------------------------------------------------------------------------------------    
+        # LPL training ---------------------------------------------------------------------------------------------------------------------------------------    
 
     
         end = time.time()
@@ -400,7 +400,7 @@ def train(train_loader, model, loss_fn, loss_cont_fn, optimizer, epoch, args, tb
             
 
         else:
-            loss = pnp_loss*0 + loss_cls + args.loss_weight1 * loss_cont+ jocor_loss*args.loss_weight2 + loss_conf_penalty*args.loss_weight4 
+            loss = loss_cls + args.loss_weight1 * loss_cont+ jocor_loss*args.loss_weight2 + loss_conf_penalty*args.loss_weight4 
 
 
         optimizer.zero_grad()
@@ -505,7 +505,7 @@ def build_webfg_dataset(root, train_transform, test_transform):
 def build_mini_webvision_dataset(root, train_transform, test_transform, num_class=50):
     train_data = webvision_dataset(root, transform=train_transform, mode='train', num_class=num_class)
     test_data = webvision_dataset(root, transform=test_transform, mode='test', num_class=num_class)
-    return {'train': train_data, 'test': test_data , #'valid': valid_data,
+    return {'train': train_data, 'test': test_data , 
             'n_train_samples': len(train_data.samples), 'n_test_samples': len(test_data.samples)}
 
 class webvision_dataset(Dataset):
@@ -516,19 +516,17 @@ class webvision_dataset(Dataset):
 
         if self.mode == 'test':
             with open(os.path.join(self.root, 'info/val_filelist.txt')) as f:
-                # print(os.path.join(self.root, 'info/val_filelist.txt'))
                 lines = f.readlines()
             self.val_imgs = []
             self.val_labels = {}
             for line in lines:
                 img, target = line.split()
-                # print(img)
                 target = int(target)
                 if target < num_class:
                     self.val_imgs.append(img)
                     self.val_labels[img] = target
             self.samples = self.val_imgs
-            self.noisy_labels = [self.val_labels[img] for img in self.samples]  # 自己加上去
+            self.noisy_labels = [self.val_labels[img] for img in self.samples]  
         else:
             with open(os.path.join(self.root, 'info/train_filelist_google.txt')) as f:
                 lines = f.readlines()
@@ -573,33 +571,13 @@ class webvision_dataset(Dataset):
             return len(self.val_imgs)
 
 def build_dataset_loader(params):
-    if params.dataset.startswith('cifar'):
-        transform = build_transform(rescale_size=32, crop_size=32)  
-    
-    if params.dataset.startswith('web-'):
-        transform = build_transform(rescale_size=448, crop_size=448)
-
     if params.dataset.startswith('Webvision'):
         transform = build_transform(rescale_size=320, crop_size=299)
 
 
-    if params.dataset == 'cifar100':
-        if params.synthetic_data == 'cifar80no': 
-            dataset = build_cifar100n_dataset(os.path.join("cifar100", params.dataset), CLDataTransform(transform['cifar_train'], transform['cifar_train_strong_aug']), transform['cifar_test'], noise_type=params.noise_type, openset_ratio=0.2, closeset_ratio=params.closeset_ratio)  
-        elif params.synthetic_data == 'cifar100nc':
-            dataset = build_cifar100n_dataset(os.path.join("cifar100", params.dataset), CLDataTransform(transform['cifar_train'], transform['cifar_train_strong_aug']), transform['cifar_test'], noise_type=params.noise_type, openset_ratio=0, closeset_ratio=params.closeset_ratio)     
-    
-    if params.dataset.startswith('web-'):  
-        if params.dataset == 'web-bird':
-            dataset = build_webfg_dataset(os.path.join("/data/fgcv/web-data/", "web-bird"), CLDataTransform(transform['train'], transform['train_strong_aug']), transform['test'])    
-        elif params.dataset == 'web-car':
-            dataset = build_webfg_dataset(os.path.join("/data/fgcv/web-data/", "web-car"), CLDataTransform(transform['train'], transform['train_strong_aug']), transform['test'])    
-        elif params.dataset == 'web-aircraft':
-            dataset = build_webfg_dataset(os.path.join("/data/fgcv/web-data/", "web-aircraft"), CLDataTransform(transform['train'], transform['train_strong_aug']), transform['test'])    
-    
     if params.dataset.startswith('Webvision'):  
-        dataset = build_mini_webvision_dataset(os.path.join("/data/WebVision/", "webvision_1"), CLDataTransform(transform['train'], transform['train_strong_aug']), transform['test'])    
-    
+        dataset = build_mini_webvision_dataset(os.path.join("/home/jxr/proj/gaoyiyou/PICO/", "webvision_1"), CLDataTransform(transform['train'], transform['train_strong_aug']), transform['test'])    
+
     
     train_loader = DataLoader(dataset['train'], batch_size=params.batch_size, shuffle=True, num_workers=8, pin_memory=True)
     test_loader = DataLoader(dataset['test'], batch_size=16, shuffle=False, num_workers=8, pin_memory=False)
