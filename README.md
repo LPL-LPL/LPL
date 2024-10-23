@@ -1,7 +1,7 @@
 # Introduction
 The source code and models for our paper **Progressive Label Distribution Estimation based on Partial Label Learning for Combating Noisy Labels**
 # Framework
-![Our Framework](https://github.com/LPL-LPL/LPL/blob/main/framework.png)
+![Our Framework](https://github.com/LPL-LPL/LPL/blob/main/main_fig.pdf)
 # Installation
 After creating a virtual environment of python 3.7, run `pip install -r requirements.txt` to install all dependencies
 # How to use
