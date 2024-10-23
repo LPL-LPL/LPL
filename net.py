@@ -72,6 +72,10 @@ def _vgg(arch: str, cfg: str, batch_norm: bool, pretrained: bool, progress: bool
     if pretrained:
         kwargs['init_weights'] = False
     model = VGG(make_layers(cfgs[cfg], batch_norm=batch_norm), **kwargs)
+    # if pretrained:
+    #     state_dict = load_state_dict_from_url(model_urls[arch],
+    #                                           progress=progress)
+    #     model.load_state_dict(state_dict)
     return model
 
 def vgg19_bn(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> VGG:
@@ -378,6 +382,7 @@ class InceptionResNetV2(nn.Module):
     def logits(self, features):
         x = self.avgpool_1a(features)
         x = x.view(x.size(0), -1)
+        # x = self.last_linear(x)
         return x
 
     def forward(self, input):
@@ -388,7 +393,7 @@ class InceptionResNetV2(nn.Module):
 def ResNetV2(**kwargs):
     return InceptionResNetV2(num_classes=200) 
 
-# resnet50 
+
 def init_weights(module, init_method='He'):
     for _, m in module.named_modules():
         if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
@@ -424,6 +429,7 @@ class MLPHead(nn.Module):
     def forward(self, x):
         return self.mlp_head(x)
 
+
 class ResNet(nn.Module):
     def __init__(self, arch='resnet50', num_classes=200, pretrained=True, activation='tanh', classifier='linear'):
         super().__init__()
@@ -458,10 +464,13 @@ class ResNet(nn.Module):
         N = x.size(0)
         x = self.backbone(x)
         x = self.neck(x).view(N, -1)
+
         return x
+
 
 def resnet50(**kwargs):
     return ResNet(arch="resnet50", num_classes=200, pretrained=True, activation='leaky relu' , classifier="linear")
+
 
 def resnet18(**kwargs):
     return ResNet(arch="resnet18", num_classes=200, pretrained=True, activation='leaky relu' , classifier="linear")
@@ -594,7 +603,7 @@ class  PreAct_ResNet(nn.Module):
         self.linear = nn.Linear(2048, num_classes)
         self.projection_head = nn.Linear(2048, 128)
         self.bnl = nn.BatchNorm1d(128)
-        self.neck = nn.AdaptiveAvgPool2d(output_size=(1, 1))  
+        self.neck = nn.AdaptiveAvgPool2d(output_size=(1, 1))  # 自己加
 
     def _make_layer(self, block, planes, num_blocks, stride):
         strides = [stride] + [1]*(num_blocks-1)
@@ -628,6 +637,10 @@ class  PreAct_ResNet(nn.Module):
 
 def PreAct_ResNet18(num_classes=10):
     return PreAct_ResNet(PreActBlock, [2,2,2,2], num_classes=num_classes)
+
+
+
+
 
 
 
@@ -673,14 +686,16 @@ class CNN(nn.Module):
         x = self.block2(x)
         x = self.block3(x)
         x = x.view(x.size(0), -1)
-        return x   
+
+        return x 
+
 
 
 def sevenCNN(**kwargs):
     return CNN(input_channel=3)
 
 model_dict = {
-    'sevenCNN':[sevenCNN,256],  
+    'sevenCNN':[sevenCNN,256], 
     'preact_resnet18': [PreAct_ResNet18, 512], 
     'resnet18': [resnet18, 512],
     'resnet50': [resnet50, 2048],
@@ -718,13 +733,14 @@ class SupConResNet(nn.Module):
         model_fun, dim_in = model_dict[name]  
         
 
+
         if pretrained:
             model = models.resnet18(pretrained=True)
             model.fc = Identity()
             self.encoder = model
 
 
-        else:  
+        else: 
             self.encoder = model_fun()
 
         

@@ -17,9 +17,7 @@ torch.cuda.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 
 
-
-# dataset --------------------------------------------------------------------------------------------------------------------------------------------
- 
+  
 def build_transform(rescale_size=512, crop_size=448):
 
     cifar_train_transform = torchvision.transforms.Compose([
@@ -41,7 +39,7 @@ def build_transform(rescale_size=512, crop_size=448):
         torchvision.transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
     ])    
 
-    # tiny image
+
     tiny_train_transform = torchvision.transforms.Compose(
     [
         torchvision.transforms.RandomCrop(64),
